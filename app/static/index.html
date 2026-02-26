@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Subtitle Editor</title>
+  <style>
+    :root {
+      --bg: #1a1a1a;
+      --panel: #2d2d2d;
+      --panel-soft: #242424;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #6366f1;
+      --accent-hover: #7c7ff5;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --border: #3b3b3b;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .container {
+      width: min(1200px, 96vw);
+      margin: 24px auto;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 22px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 0 0 18px;
+      font-size: 14px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    button, .btn-file {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background .2s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    button:hover, .btn-file:hover { background: var(--accent-hover); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .btn-file input { display: none; }
+
+    .btn-muted { background: #4b5563; }
+    .btn-muted:hover { background: #5b6574; }
+
+    .btn-danger { background: var(--danger); }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 10px 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .progress-wrap {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: #111;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      margin-bottom: 10px;
+    }
+
+    .progress {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #4f46e5, #6366f1);
+      transition: width .25s ease;
+    }
+
+    video {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #000;
+      margin-top: 8px;
+    }
+
+    .meta {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 10px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .subtitle-list {
+      max-height: 70vh;
+      overflow: auto;
+      display: grid;
+      gap: 10px;
+      padding-right: 4px;
+    }
+
+    .subtitle-card {
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      border-radius: 10px;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      transition: border-color .2s ease, box-shadow .2s ease;
+    }
+
+    .subtitle-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(99, 102, 241, .25);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    input, textarea {
+      width: 100%;
+      background: #181818;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 54px;
+    }
+
+    .empty {
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      padding: 16px;
+      text-align: center;
+    }
+
+    .toast-wrap {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      display: grid;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    .toast {
+      background: #111827;
+      border: 1px solid #374151;
+      color: #e5e7eb;
+      padding: 10px 12px;
+      border-radius: 8px;
+      min-width: 220px;
+      font-size: 13px;
+    }
+
+    .toast.success { border-color: #14532d; }
+    .toast.error { border-color: #7f1d1d; }
+
+    @media (max-width: 980px) {
+      .container {
+        grid-template-columns: 1fr;
+      }
+
+      .subtitle-list {
+        max-height: unset;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="panel">
+      <h1>AI Subtitle Editor</h1>
+      <p class="subtitle">Загрузка видео, AI-генерация субтитров, ручное редактирование и экспорт через FFmpeg.</p>
+
+      <div class="controls">
+        <label class="btn-file">📹 Загрузить видео
+          <input id="videoInput" type="file" accept="video/*" />
+        </label>
+        <label class="btn-file btn-muted">📝 Загрузить SRT
+          <input id="srtInput" type="file" accept=".srt" />
+        </label>
+        <button id="generateBtn">🤖 AI Генерация</button>
+        <button id="saveBtn" class="btn-muted">💾 Сохранить SRT</button>
+        <button id="downloadBtn" class="btn-muted">⬇️ Скачать SRT</button>
+        <button id="exportBtn">🎬 Вшить субтитры</button>
+      </div>
+
+      <div class="status-row">
+        <span id="statusText">Статус: ожидание действий</span>
+        <span id="progressText">0%</span>
+      </div>
+      <div class="progress-wrap"><div id="progressBar" class="progress"></div></div>
+
+      <video id="video" controls></video>
+
+      <div class="meta">
+        <div><b>file_id:</b> <span id="fileId">—</span></div>
+        <div><b>Активный субтитр:</b> <span id="activeCaption">—</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="controls" style="margin-bottom: 10px;">
+        <button id="addSubtitleBtn" class="btn-muted">➕ Добавить субтитр</button>
+      </div>
+      <div id="subtitleList" class="subtitle-list">
+        <div class="empty">Субтитры пока не загружены. Загрузите видео и выполните AI генерацию или импортируйте .srt.</div>
+      </div>
+    </section>
+  </div>
+
+  <div id="toastWrap" class="toast-wrap"></div>
+
+  <script>
+    // --- Глобальное состояние интерфейса ---
+    const state = {
+      fileId: null,
+      subtitles: [],
+      pollingTimer: null,
+      activeIndex: -1,
+      exportTaskId: null,
+    };
+
+    const el = {
+      videoInput: document.getElementById('videoInput'),
+      srtInput: document.getElementById('srtInput'),
+      generateBtn: document.getElementById('generateBtn'),
+      saveBtn: document.getElementById('saveBtn'),
+      downloadBtn: document.getElementById('downloadBtn'),
+      exportBtn: document.getElementById('exportBtn'),
+      addSubtitleBtn: document.getElementById('addSubtitleBtn'),
+      subtitleList: document.getElementById('subtitleList'),
+      statusText: document.getElementById('statusText'),
+      progressBar: document.getElementById('progressBar'),
+      progressText: document.getElementById('progressText'),
+      video: document.getElementById('video'),
+      fileId: document.getElementById('fileId'),
+      activeCaption: document.getElementById('activeCaption'),
+      toastWrap: document.getElementById('toastWrap'),
+    };
+
+    // --- Утилита: отображение уведомления пользователю ---
+    function toast(message, type = 'info') {
+      const node = document.createElement('div');
+      node.className = `toast ${type}`;
+      node.textContent = message;
+      el.toastWrap.appendChild(node);
+      setTimeout(() => node.remove(), 3500);
+    }
+
+    // --- Утилита: формат времени из секунд в HH:MM:SS,mmm ---
+    function secToSrt(seconds) {
+      const ms = Math.max(0, Math.round(Number(seconds) * 1000));
+      const hh = Math.floor(ms / 3600000);
+      const mm = Math.floor((ms % 3600000) / 60000);
+      const ss = Math.floor((ms % 60000) / 1000);
+      const mmm = ms % 1000;
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')},${String(mmm).padStart(3, '0')}`;
+    }
+
+    // --- Утилита: парсинг HH:MM:SS,mmm в секунды ---
+    function srtToSec(raw) {
+      const m = String(raw).trim().match(/^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/);
+      if (!m) return NaN;
+      return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000;
+    }
+
+    // --- Обновление общего статуса и полосы прогресса ---
+    function setProgress(statusText, value) {
+      const progress = Math.max(0, Math.min(100, Number(value || 0)));
+      el.statusText.textContent = `Статус: ${statusText}`;
+      el.progressText.textContent = `${progress}%`;
+      el.progressBar.style.width = `${progress}%`;
+    }
+
+    // --- Рендер списка субтитров (карточки Start/End/Text) ---
+    function renderSubtitles() {
+      if (!state.subtitles.length) {
+        el.subtitleList.innerHTML = '<div class="empty">Список пуст. Добавьте строки вручную или сгенерируйте AI.</div>';
+        return;
+      }
+
+      el.subtitleList.innerHTML = '';
+      state.subtitles.forEach((item, index) => {
+        const card = document.createElement('div');
+        card.className = 'subtitle-card';
+        card.dataset.index = String(index);
+
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        const startInput = document.createElement('input');
+        startInput.value = secToSrt(item.start);
+        startInput.placeholder = '00:00:00,000';
+        startInput.addEventListener('change', () => {
+          const value = srtToSec(startInput.value);
+          if (Number.isNaN(value)) return toast('Неверный формат Start', 'error');
+          state.subtitles[index].start = value;
+        });
+
+        const endInput = document.createElement('input');
+        endInput.value = secToSrt(item.end);
+        endInput.placeholder = '00:00:00,000';
+        endInput.addEventListener('change', () => {
+          const value = srtToSec(endInput.value);
+          if (Number.isNaN(value)) return toast('Неверный формат End', 'error');
+          state.subtitles[index].end = value;
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn-danger';
+        removeBtn.type = 'button';
+        removeBtn.textContent = 'Удалить';
+        removeBtn.addEventListener('click', () => {
+          state.subtitles.splice(index, 1);
+          normalizeSubtitleIds();
+          renderSubtitles();
+        });
+
+        row.append(startInput, endInput, removeBtn);
+
+        const textArea = document.createElement('textarea');
+        textArea.value = item.text;
+        textArea.addEventListener('input', () => {
+          state.subtitles[index].text = textArea.value;
+        });
+
+        card.append(row, textArea);
+        card.addEventListener('click', (event) => {
+          if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLButtonElement) {
+            return;
+          }
+          el.video.currentTime = Number(state.subtitles[index].start || 0);
+          el.video.play().catch(() => {});
+        });
+
+        el.subtitleList.appendChild(card);
+      });
+
+      highlightActiveSubtitle();
+    }
+
+    // --- Нормализация id после добавления/удаления ---
+    function normalizeSubtitleIds() {
+      state.subtitles = state.subtitles.map((entry, i) => ({ ...entry, id: i + 1 }));
+    }
+
+    // --- Подсветка активного субтитра согласно позиции видео ---
+    function highlightActiveSubtitle() {
+      if (!state.subtitles.length) return;
+      const current = el.video.currentTime;
+      const idx = state.subtitles.findIndex((s) => current >= s.start && current <= s.end);
+      state.activeIndex = idx;
+      el.activeCaption.textContent = idx >= 0 ? `#${idx + 1}` : '—';
+
+      [...el.subtitleList.querySelectorAll('.subtitle-card')].forEach((node, i) => {
+        node.classList.toggle('active', i === idx);
+      });
+    }
+
+    // --- Общая функция запросов API c обработкой ошибок ---
+    async function api(path, options = {}) {
+      const response = await fetch(path, options);
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json();
+          detail = payload.detail || JSON.stringify(payload);
+        } catch (_e) {}
+        throw new Error(detail);
+      }
+      const ct = response.headers.get('content-type') || '';
+      return ct.includes('application/json') ? response.json() : response;
+    }
+
+    // --- Загрузка видео на backend ---
+    async function uploadVideo(file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      setProgress('загрузка видео', 5);
+      const data = await api('/api/upload/video', { method: 'POST', body: fd });
+      state.fileId = data.file_id;
+      el.fileId.textContent = data.file_id;
+      el.video.src = `/api/video/${data.file_id}`;
+      setProgress('видео загружено', 20);
+      toast('Видео успешно загружено', 'success');
+    }
+
+    // --- Загрузка пользовательского SRT ---
+    async function uploadSrt(file) {
+      if (!state.fileId) {
+        toast('Сначала загрузите видео', 'error');
+        return;
+      }
+      const fd = new FormData();
+      fd.append('file', file);
+      const params = new URLSearchParams({ file_id: state.fileId });
+      await api(`/api/upload/subtitles?${params.toString()}`, { method: 'POST', body: fd });
+      toast('SRT загружен', 'success');
+      await fetchSubtitles();
+    }
+
+    // --- Получение субтитров с backend ---
+    async function fetchSubtitles() {
+      if (!state.fileId) return;
+      const data = await api(`/api/subtitles/${state.fileId}`);
+      state.subtitles = data.subtitles || [];
+      normalizeSubtitleIds();
+      renderSubtitles();
+    }
+
+    // --- Сохранение отредактированных субтитров ---
+    async function saveSubtitles() {
+      if (!state.fileId) return toast('Нет активного file_id', 'error');
+      normalizeSubtitleIds();
+      await api(`/api/subtitles/${state.fileId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subtitles: state.subtitles }),
+      });
+      toast('Субтитры сохранены', 'success');
+    }
+
+    // --- Клиентская генерация SRT и скачивание файла ---
+    function downloadSrt() {
+      if (!state.subtitles.length) return toast('Нет данных для экспорта SRT', 'error');
+      const content = state.subtitles.map((s, i) => {
+        return `${i + 1}\n${secToSrt(s.start)} --> ${secToSrt(s.end)}\n${s.text}\n`;
+      }).join('\n');
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${state.fileId || 'subtitles'}.srt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // --- Универсальный polling для задач backend (/api/status/{task_id}) ---
+    async function pollTask(taskId, onDone) {
+      clearInterval(state.pollingTimer);
+      setProgress('задача запущена', 1);
+
+      state.pollingTimer = setInterval(async () => {
+        try {
+          const status = await api(`/api/status/${taskId}`);
+          setProgress(status.status, status.progress ?? 0);
+
+          if (status.status === 'completed') {
+            clearInterval(state.pollingTimer);
+            state.pollingTimer = null;
+            toast('Задача завершена', 'success');
+            if (typeof onDone === 'function') onDone(status);
+          }
+
+          if (status.status === 'failed') {
+            clearInterval(state.pollingTimer);
+            state.pollingTimer = null;
+            toast(`Ошибка задачи: ${status.error || 'неизвестно'}`, 'error');
+          }
+        } catch (error) {
+          clearInterval(state.pollingTimer);
+          state.pollingTimer = null;
+          toast(`Ошибка polling: ${error.message}`, 'error');
+        }
+      }, 2000);
+    }
+
+    // --- Запуск AI генерации через Whisper ---
+    async function startGenerate() {
+      if (!state.fileId) return toast('Сначала загрузите видео', 'error');
+      const payload = { file_id: state.fileId, model_size: 'base', language: 'ru' };
+      const data = await api('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      pollTask(data.task_id, async () => {
+        await fetchSubtitles();
+      });
+    }
+
+    // --- Запуск вшивания субтитров через FFmpeg ---
+    async function startExport() {
+      if (!state.fileId) return toast('Сначала загрузите видео', 'error');
+      await saveSubtitles();
+      const data = await api('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: state.fileId }),
+      });
+
+      pollTask(data.task_id, (status) => {
+        const url = status?.result?.download_url;
+        if (!url) return;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
+    }
+
+    // --- Привязка событий UI ---
+    el.videoInput.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        await uploadVideo(file);
+      } catch (error) {
+        toast(`Ошибка загрузки видео: ${error.message}`, 'error');
+      }
+    });
+
+    el.srtInput.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        await uploadSrt(file);
+      } catch (error) {
+        toast(`Ошибка загрузки SRT: ${error.message}`, 'error');
+      }
+    });
+
+    el.generateBtn.addEventListener('click', async () => {
+      try {
+        await startGenerate();
+      } catch (error) {
+        toast(`Ошибка генерации: ${error.message}`, 'error');
+      }
+    });
+
+    el.saveBtn.addEventListener('click', async () => {
+      try {
+        await saveSubtitles();
+      } catch (error) {
+        toast(`Ошибка сохранения: ${error.message}`, 'error');
+      }
+    });
+
+    el.downloadBtn.addEventListener('click', downloadSrt);
+
+    el.exportBtn.addEventListener('click', async () => {
+      try {
+        await startExport();
+      } catch (error) {
+        toast(`Ошибка экспорта: ${error.message}`, 'error');
+      }
+    });
+
+    el.addSubtitleBtn.addEventListener('click', () => {
+      const start = Math.max(0, el.video.currentTime || 0);
+      state.subtitles.push({
+        id: state.subtitles.length + 1,
+        start,
+        end: start + 2,
+        text: 'Новый субтитр',
+      });
+      normalizeSubtitleIds();
+      renderSubtitles();
+    });
+
+    el.video.addEventListener('timeupdate', highlightActiveSubtitle);
+
+    // --- Стартовое состояние экрана ---
+    setProgress('ожидание действий', 0);
+  </script>
+</body>
+</html>
