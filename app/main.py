@@ -53,6 +53,13 @@ class ExportRequest(BaseModel):
     """Параметры экспорта видео с вшитыми субтитрами."""
 
     file_id: str
+    font_name: str = Field(default="Arial", min_length=1, max_length=64)
+    font_size: int = Field(default=28, ge=12, le=96)
+    subtitle_position: Literal["top", "middle", "bottom"] = "bottom"
+    margin_v: int = Field(default=30, ge=0, le=300)
+    primary_color: str = Field(default="&H00FFFFFF", pattern=r"^&H[0-9A-Fa-f]{8}$")
+    outline_color: str = Field(default="&H00000000", pattern=r"^&H[0-9A-Fa-f]{8}$")
+    outline: int = Field(default=2, ge=0, le=8)
 
 
 class TaskState(BaseModel):
@@ -225,24 +232,46 @@ def _run_whisper_task(task_id: str, file_id: str, model_size: str, language: Opt
         tasks_store[task_id] = TaskState(status="failed", progress=100, error=str(exc))
 
 
-def _run_export_task(task_id: str, file_id: str) -> None:
+def _build_force_style(payload: ExportRequest) -> str:
+    """Собирает ASS force_style для кастомизации шрифта и позиции субтитров."""
+
+    alignment_map = {
+        "bottom": 2,
+        "middle": 5,
+        "top": 8,
+    }
+    alignment = alignment_map[payload.subtitle_position]
+    style = {
+        "FontName": payload.font_name,
+        "FontSize": payload.font_size,
+        "PrimaryColour": payload.primary_color,
+        "OutlineColour": payload.outline_color,
+        "Outline": payload.outline,
+        "Alignment": alignment,
+        "MarginV": payload.margin_v,
+    }
+    return ",".join(f"{key}={value}" for key, value in style.items())
+
+
+def _run_export_task(task_id: str, payload: ExportRequest) -> None:
     """Фоновая задача: вшивает субтитры в видео через FFmpeg."""
 
     try:
         tasks_store[task_id] = TaskState(status="processing", progress=10)
-        video_path = safe_video_path(file_id)
-        subtitles_path = safe_subtitle_path(file_id)
+        video_path = safe_video_path(payload.file_id)
+        subtitles_path = safe_subtitle_path(payload.file_id)
 
-        output_path = OUTPUT_DIR / f"{file_id}_burned.mp4"
+        output_path = OUTPUT_DIR / f"{payload.file_id}_burned.mp4"
         tasks_store[task_id] = TaskState(status="processing", progress=60)
 
         subtitles_filter_path = escape_subtitles_filter_path(subtitles_path)
+        force_style = _build_force_style(payload)
 
         (
             ffmpeg.input(str(video_path))
             .output(
                 str(output_path),
-                vf=f"subtitles='{subtitles_filter_path}'",
+                vf=f"subtitles='{subtitles_filter_path}':force_style='{force_style}'",
                 vcodec="libx264",
                 acodec="aac",
                 movflags="+faststart",
@@ -414,7 +443,7 @@ async def export_video(payload: ExportRequest, background_tasks: BackgroundTasks
 
     task_id = uuid.uuid4().hex
     tasks_store[task_id] = TaskState(status="queued", progress=0)
-    background_tasks.add_task(_run_export_task, task_id, payload.file_id)
+    background_tasks.add_task(_run_export_task, task_id, payload)
     return {"task_id": task_id, "status": "queued"}
 
 

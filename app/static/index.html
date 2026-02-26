@@ -236,6 +236,25 @@
         <button id="exportBtn">🎬 Вшить субтитры</button>
       </div>
 
+      <div class="panel" style="padding:12px; margin-bottom: 12px;">
+        <div style="font-size:13px; color: var(--muted); margin-bottom:8px;">Параметры вшивания субтитров</div>
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr; margin-bottom:8px;">
+          <input id="fontNameInput" type="text" value="Arial" placeholder="Шрифт (например Arial)" />
+          <input id="fontSizeInput" type="number" min="12" max="96" value="28" placeholder="Размер" />
+          <select id="positionInput" style="background:#181818;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;">
+            <option value="bottom">Снизу</option>
+            <option value="middle">По центру</option>
+            <option value="top">Сверху</option>
+          </select>
+        </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr 1fr;">
+          <input id="marginVInput" type="number" min="0" max="300" value="30" placeholder="Отступ по вертикали" />
+          <input id="textColorInput" type="color" value="#ffffff" title="Цвет текста" />
+          <input id="outlineColorInput" type="color" value="#000000" title="Цвет обводки" />
+          <input id="outlineInput" type="number" min="0" max="8" value="2" placeholder="Обводка" />
+        </div>
+      </div>
+
       <div class="status-row">
         <span id="statusText">Статус: ожидание действий</span>
         <span id="progressText">0%</span>
@@ -279,6 +298,13 @@
       saveBtn: document.getElementById('saveBtn'),
       downloadBtn: document.getElementById('downloadBtn'),
       exportBtn: document.getElementById('exportBtn'),
+      fontNameInput: document.getElementById('fontNameInput'),
+      fontSizeInput: document.getElementById('fontSizeInput'),
+      positionInput: document.getElementById('positionInput'),
+      marginVInput: document.getElementById('marginVInput'),
+      textColorInput: document.getElementById('textColorInput'),
+      outlineColorInput: document.getElementById('outlineColorInput'),
+      outlineInput: document.getElementById('outlineInput'),
       addSubtitleBtn: document.getElementById('addSubtitleBtn'),
       subtitleList: document.getElementById('subtitleList'),
       statusText: document.getElementById('statusText'),
@@ -537,10 +563,29 @@
     async function startExport() {
       if (!state.fileId) return toast('Сначала загрузите видео', 'error');
       await saveSubtitles();
+      const toAssColor = (hex) => {
+        const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+        if (!m) return '&H00FFFFFF';
+        const v = m[1];
+        const r = v.slice(0, 2);
+        const g = v.slice(2, 4);
+        const b = v.slice(4, 6);
+        return `&H00${b}${g}${r}`.toUpperCase();
+      };
+
       const data = await api('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: state.fileId }),
+        body: JSON.stringify({
+          file_id: state.fileId,
+          font_name: el.fontNameInput.value || 'Arial',
+          font_size: Number(el.fontSizeInput.value || 28),
+          subtitle_position: el.positionInput.value || 'bottom',
+          margin_v: Number(el.marginVInput.value || 30),
+          primary_color: toAssColor(el.textColorInput.value),
+          outline_color: toAssColor(el.outlineColorInput.value),
+          outline: Number(el.outlineInput.value || 2),
+        }),
       });
 
       pollTask(data.task_id, (status) => {
