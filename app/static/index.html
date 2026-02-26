@@ -290,6 +290,14 @@
           <input id="outlineColorInput" type="color" value="#000000" title="Цвет обводки" />
           <input id="outlineInput" type="number" min="0" max="8" value="2" placeholder="Обводка" />
         </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr; margin-top:8px;">
+          <input id="speedInput" type="number" min="0.5" max="3" step="0.05" value="1" placeholder="Скорость видео" />
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
+            <input id="karaokeEnabledInput" type="checkbox" checked /> Подсветка слов (karaoke)
+          </label>
+          <input id="karaokeColorInput" type="color" value="#ff6600" title="Цвет karaoke-подсветки" />
+        </div>
+        <div id="exportSettingsText" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
       </div>
 
       <div class="status-row">
@@ -347,6 +355,10 @@
       textColorInput: document.getElementById('textColorInput'),
       outlineColorInput: document.getElementById('outlineColorInput'),
       outlineInput: document.getElementById('outlineInput'),
+      speedInput: document.getElementById('speedInput'),
+      karaokeEnabledInput: document.getElementById('karaokeEnabledInput'),
+      karaokeColorInput: document.getElementById('karaokeColorInput'),
+      exportSettingsText: document.getElementById('exportSettingsText'),
       addSubtitleBtn: document.getElementById('addSubtitleBtn'),
       subtitleList: document.getElementById('subtitleList'),
       statusText: document.getElementById('statusText'),
@@ -541,6 +553,13 @@
         -${outline}px  ${outline}px 0 ${outlineColor},
          ${outline}px  ${outline}px 0 ${outlineColor},
          0px 2px 6px rgba(0, 0, 0, 0.7)`;
+
+      el.exportSettingsText.textContent = [
+        `Шрифт: ${el.fontNameInput.value || 'Arial'} ${fontSize}px`,
+        `Позиция: ${el.positionInput.value}, marginV=${marginV}`,
+        `Скорость: x${Number(el.speedInput.value || 1).toFixed(2)}`,
+        `Karaoke: ${el.karaokeEnabledInput.checked ? 'вкл' : 'выкл'}`,
+      ].join(' | ');
     }
 
     // --- Подсветка активного субтитра согласно позиции видео ---
@@ -723,6 +742,9 @@
           primary_color: toAssColor(el.textColorInput.value),
           outline_color: toAssColor(el.outlineColorInput.value),
           outline: Number(el.outlineInput.value || 2),
+          playback_speed: Number(el.speedInput.value || 1),
+          karaoke_enabled: Boolean(el.karaokeEnabledInput.checked),
+          karaoke_highlight_color: toAssColor(el.karaokeColorInput.value),
         }),
       });
 
@@ -807,6 +829,9 @@
       el.textColorInput,
       el.outlineColorInput,
       el.outlineInput,
+      el.speedInput,
+      el.karaokeEnabledInput,
+      el.karaokeColorInput,
     ].forEach((node) => {
       node.addEventListener('input', updateSubtitlePreview);
       node.addEventListener('change', updateSubtitlePreview);

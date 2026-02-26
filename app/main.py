@@ -60,6 +60,9 @@ class ExportRequest(BaseModel):
     primary_color: str = Field(default="&H00FFFFFF", pattern=r"^&H[0-9A-Fa-f]{8}$")
     outline_color: str = Field(default="&H00000000", pattern=r"^&H[0-9A-Fa-f]{8}$")
     outline: int = Field(default=2, ge=0, le=8)
+    playback_speed: float = Field(default=1.0, ge=0.5, le=3.0)
+    karaoke_enabled: bool = True
+    karaoke_highlight_color: str = Field(default="&H000066FF", pattern=r"^&H[0-9A-Fa-f]{8}$")
 
 
 class TaskState(BaseModel):
@@ -311,7 +314,7 @@ def _save_ass_from_srt(file_id: str, payload: ExportRequest, width: int, height:
             " Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
         ),
         (
-            f"Style: Default,{font_name},{payload.font_size},{payload.primary_color},&H000000FF,{payload.outline_color},&H00000000,"
+            f"Style: Default,{font_name},{payload.font_size},{payload.primary_color},{payload.karaoke_highlight_color},{payload.outline_color},&H00000000,"
             f"0,0,0,0,100,100,0,0,1,{payload.outline},0,{alignment},24,24,{payload.margin_v},1"
         ),
         "",
@@ -321,6 +324,13 @@ def _save_ass_from_srt(file_id: str, payload: ExportRequest, width: int, height:
 
     for item in subtitles:
         safe_text = item.text.replace("{", "(").replace("}", ")").replace("\n", r"\N").strip()
+        if payload.karaoke_enabled and safe_text:
+            words = [word for word in re.split(r"\s+", safe_text) if word]
+            if words:
+                duration_cs = max(1, int(round((item.end - item.start) * 100)))
+                per_word = max(1, duration_cs // len(words))
+                karaoke_text = " ".join(f"{{\\k{per_word}}}{word}" for word in words)
+                safe_text = karaoke_text
         lines.append(
             "Dialogue: 0,"
             f"{_to_ass_timestamp(item.start)},"
@@ -370,6 +380,22 @@ def _run_export_task(task_id: str, payload: ExportRequest) -> None:
         else:
             video_stream = src.video.filter("subtitles", subtitles_filter_path, **filter_kwargs)
         audio_stream = src.audio
+
+        speed = float(payload.playback_speed)
+        if abs(speed - 1.0) > 1e-6:
+            video_stream = video_stream.filter("setpts", f"PTS/{speed}")
+            # atempo поддерживает диапазон 0.5..2.0, поэтому раскладываем скорость в цепочку.
+            rest = speed
+            atempo_values = []
+            while rest > 2.0:
+                atempo_values.append(2.0)
+                rest /= 2.0
+            while rest < 0.5:
+                atempo_values.append(0.5)
+                rest /= 0.5
+            atempo_values.append(rest)
+            for value in atempo_values:
+                audio_stream = audio_stream.filter("atempo", value)
 
         (
             ffmpeg.output(
