@@ -241,8 +241,12 @@ def _build_force_style(payload: ExportRequest) -> str:
         "top": 8,
     }
     alignment = alignment_map[payload.subtitle_position]
+    # Важно: в force_style нельзя передавать запятые и одинарные кавычки без экранирования,
+    # иначе ffmpeg/libass может некорректно распарсить стиль и применить дефолт.
+    safe_font_name = payload.font_name.replace("'", "").replace(",", " ").strip() or "Arial"
+
     style = {
-        "FontName": payload.font_name,
+        "FontName": safe_font_name,
         "FontSize": payload.font_size,
         "PrimaryColour": payload.primary_color,
         "OutlineColour": payload.outline_color,
@@ -250,7 +254,8 @@ def _build_force_style(payload: ExportRequest) -> str:
         "Alignment": alignment,
         "MarginV": payload.margin_v,
     }
-    return ",".join(f"{key}={value}" for key, value in style.items())
+    # Экранируем разделители внутри filtergraph.
+    return r"\,".join(f"{key}={value}" for key, value in style.items())
 
 
 def _run_export_task(task_id: str, payload: ExportRequest) -> None:
@@ -269,9 +274,9 @@ def _run_export_task(task_id: str, payload: ExportRequest) -> None:
 
         (
             ffmpeg.input(str(video_path))
+            .filter("subtitles", subtitles_filter_path, force_style=force_style)
             .output(
                 str(output_path),
-                vf=f"subtitles='{subtitles_filter_path}':force_style='{force_style}'",
                 vcodec="libx264",
                 acodec="aac",
                 movflags="+faststart",
