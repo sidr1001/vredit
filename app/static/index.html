@@ -123,6 +123,33 @@
       margin-top: 8px;
     }
 
+    .video-wrap {
+      position: relative;
+      margin-top: 8px;
+    }
+
+    .subtitle-preview {
+      position: absolute;
+      left: 6%;
+      right: 6%;
+      bottom: 24px;
+      text-align: center;
+      color: #fff;
+      font-size: 28px;
+      font-family: Arial, sans-serif;
+      text-shadow:
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000,
+         0px  2px 6px rgba(0, 0, 0, 0.7);
+      pointer-events: none;
+      z-index: 5;
+      white-space: pre-wrap;
+      line-height: 1.25;
+      display: none;
+    }
+
     .meta {
       font-size: 13px;
       color: var(--muted);
@@ -261,7 +288,10 @@
       </div>
       <div class="progress-wrap"><div id="progressBar" class="progress"></div></div>
 
-      <video id="video" controls></video>
+      <div class="video-wrap">
+        <video id="video" controls></video>
+        <div id="subtitlePreview" class="subtitle-preview"></div>
+      </div>
 
       <div class="meta">
         <div><b>file_id:</b> <span id="fileId">—</span></div>
@@ -311,6 +341,7 @@
       progressBar: document.getElementById('progressBar'),
       progressText: document.getElementById('progressText'),
       video: document.getElementById('video'),
+      subtitlePreview: document.getElementById('subtitlePreview'),
       fileId: document.getElementById('fileId'),
       activeCaption: document.getElementById('activeCaption'),
       toastWrap: document.getElementById('toastWrap'),
@@ -422,9 +453,79 @@
       state.subtitles = state.subtitles.map((entry, i) => ({ ...entry, id: i + 1 }));
     }
 
+    function assToHexColor(assColor) {
+      const m = /^&H([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(assColor || '').trim());
+      if (!m) return '#ffffff';
+      const b = m[2];
+      const g = m[3];
+      const r = m[4];
+      return `#${r}${g}${b}`.toLowerCase();
+    }
+
+    // --- Визуальный предпросмотр субтитров поверх video в реальном времени ---
+    function updateSubtitlePreview() {
+      const idx = state.activeIndex;
+      if (idx < 0 || !state.subtitles[idx]) {
+        el.subtitlePreview.style.display = 'none';
+        el.subtitlePreview.textContent = '';
+        return;
+      }
+
+      const entry = state.subtitles[idx];
+      el.subtitlePreview.style.display = 'block';
+      el.subtitlePreview.textContent = entry.text || '';
+
+      const position = el.positionInput.value || 'bottom';
+      const marginV = Number(el.marginVInput.value || 30);
+      if (position === 'top') {
+        el.subtitlePreview.style.top = `${marginV}px`;
+        el.subtitlePreview.style.bottom = 'auto';
+      } else if (position === 'middle') {
+        el.subtitlePreview.style.top = '50%';
+        el.subtitlePreview.style.bottom = 'auto';
+        el.subtitlePreview.style.transform = 'translateY(-50%)';
+      } else {
+        el.subtitlePreview.style.top = 'auto';
+        el.subtitlePreview.style.bottom = `${marginV}px`;
+      }
+
+      if (position !== 'middle') {
+        el.subtitlePreview.style.transform = 'none';
+      }
+
+      const fontSize = Math.max(12, Math.min(96, Number(el.fontSizeInput.value || 28)));
+      const outline = Math.max(0, Math.min(8, Number(el.outlineInput.value || 2)));
+      const textColor = assToHexColor((() => {
+        const m = /^#?([0-9a-f]{6})$/i.exec(String(el.textColorInput.value || '').trim());
+        if (!m) return '&H00FFFFFF';
+        const v = m[1];
+        return `&H00${v.slice(4, 6)}${v.slice(2, 4)}${v.slice(0, 2)}`.toUpperCase();
+      })());
+      const outlineColor = assToHexColor((() => {
+        const m = /^#?([0-9a-f]{6})$/i.exec(String(el.outlineColorInput.value || '').trim());
+        if (!m) return '&H00000000';
+        const v = m[1];
+        return `&H00${v.slice(4, 6)}${v.slice(2, 4)}${v.slice(0, 2)}`.toUpperCase();
+      })());
+
+      el.subtitlePreview.style.color = textColor;
+      el.subtitlePreview.style.fontFamily = `${el.fontNameInput.value || 'Arial'}, sans-serif`;
+      el.subtitlePreview.style.fontSize = `${fontSize}px`;
+      el.subtitlePreview.style.textShadow = `
+        -${outline}px -${outline}px 0 ${outlineColor},
+         ${outline}px -${outline}px 0 ${outlineColor},
+        -${outline}px  ${outline}px 0 ${outlineColor},
+         ${outline}px  ${outline}px 0 ${outlineColor},
+         0px 2px 6px rgba(0, 0, 0, 0.7)`;
+    }
+
     // --- Подсветка активного субтитра согласно позиции видео ---
     function highlightActiveSubtitle() {
-      if (!state.subtitles.length) return;
+      if (!state.subtitles.length) {
+        state.activeIndex = -1;
+        updateSubtitlePreview();
+        return;
+      }
       const current = el.video.currentTime;
       const idx = state.subtitles.findIndex((s) => current >= s.start && current <= s.end);
       state.activeIndex = idx;
@@ -433,6 +534,8 @@
       [...el.subtitleList.querySelectorAll('.subtitle-card')].forEach((node, i) => {
         node.classList.toggle('active', i === idx);
       });
+
+      updateSubtitlePreview();
     }
 
     // --- Общая функция запросов API c обработкой ошибок ---
@@ -484,6 +587,7 @@
       state.subtitles = data.subtitles || [];
       normalizeSubtitleIds();
       renderSubtitles();
+      updateSubtitlePreview();
     }
 
     // --- Сохранение отредактированных субтитров ---
@@ -661,8 +765,22 @@
 
     el.video.addEventListener('timeupdate', highlightActiveSubtitle);
 
+    [
+      el.fontNameInput,
+      el.fontSizeInput,
+      el.positionInput,
+      el.marginVInput,
+      el.textColorInput,
+      el.outlineColorInput,
+      el.outlineInput,
+    ].forEach((node) => {
+      node.addEventListener('input', updateSubtitlePreview);
+      node.addEventListener('change', updateSubtitlePreview);
+    });
+
     // --- Стартовое состояние экрана ---
     setProgress('ожидание действий', 0);
+    updateSubtitlePreview();
   </script>
 </body>
 </html>
