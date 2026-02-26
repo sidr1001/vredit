@@ -118,6 +118,10 @@ def srt_path(file_id: str) -> Path:
     return OUTPUT_DIR / f"{file_id}.srt"
 
 
+def ass_path(file_id: str) -> Path:
+    return OUTPUT_DIR / f"{file_id}.ass"
+
+
 def escape_subtitles_filter_path(path: Path) -> str:
     """Экранирует путь для безопасной подстановки в ffmpeg subtitles filter."""
 
@@ -270,6 +274,65 @@ def _build_force_style(payload: ExportRequest) -> str:
     return ",".join(f"{key}={value}" for key, value in style.items())
 
 
+def _to_ass_timestamp(seconds: float) -> str:
+    """Преобразует секунды в ASS-формат времени H:MM:SS.cc."""
+
+    total_cs = max(0, int(round(seconds * 100)))
+    hh = total_cs // 360000
+    mm = (total_cs % 360000) // 6000
+    ss = (total_cs % 6000) // 100
+    cs = total_cs % 100
+    return f"{hh}:{mm:02}:{ss:02}.{cs:02}"
+
+
+def _save_ass_from_srt(file_id: str, payload: ExportRequest, width: int, height: int) -> Path:
+    """Собирает ASS-файл с корректным PlayRes для стабильного размера субтитров."""
+
+    subtitles = parse_srt_file(srt_path(file_id))
+    alignment_map = {
+        "bottom": 2,
+        "middle": 5,
+        "top": 8,
+    }
+    alignment = alignment_map[payload.subtitle_position]
+    font_name = payload.font_name.replace(",", " ").replace("'", "").strip() or "Arial"
+
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        f"PlayResX: {max(1, width)}",
+        f"PlayResY: {max(1, height)}",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        (
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour,"
+            " Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle,"
+            " Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
+        ),
+        (
+            f"Style: Default,{font_name},{payload.font_size},{payload.primary_color},&H000000FF,{payload.outline_color},&H00000000,"
+            f"0,0,0,0,100,100,0,0,1,{payload.outline},0,{alignment},24,24,{payload.margin_v},1"
+        ),
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+
+    for item in subtitles:
+        safe_text = item.text.replace("{", "(").replace("}", ")").replace("\n", r"\N").strip()
+        lines.append(
+            "Dialogue: 0,"
+            f"{_to_ass_timestamp(item.start)},"
+            f"{_to_ass_timestamp(item.end)},"
+            f"Default,,0,0,0,,{safe_text}"
+        )
+
+    target = ass_path(file_id)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return target
+
+
 def _run_export_task(task_id: str, payload: ExportRequest) -> None:
     """Фоновая задача: вшивает субтитры в видео через FFmpeg."""
 
@@ -301,7 +364,11 @@ def _run_export_task(task_id: str, payload: ExportRequest) -> None:
             if width > 0 and height > 0:
                 filter_kwargs["original_size"] = f"{width}x{height}"
 
-        video_stream = src.video.filter("subtitles", subtitles_filter_path, **filter_kwargs)
+        if video_stream_info and width > 0 and height > 0:
+            generated_ass = _save_ass_from_srt(payload.file_id, payload, width, height)
+            video_stream = src.video.filter("ass", escape_subtitles_filter_path(generated_ass))
+        else:
+            video_stream = src.video.filter("subtitles", subtitles_filter_path, **filter_kwargs)
         audio_stream = src.audio
 
         (
@@ -354,6 +421,8 @@ async def cleanup_loop() -> None:
                 srt_file.unlink(missing_ok=True)
                 burned = OUTPUT_DIR / f"{file_id}_burned.mp4"
                 burned.unlink(missing_ok=True)
+                ass_file = ass_path(file_id)
+                ass_file.unlink(missing_ok=True)
 
             await asyncio.sleep(300)
         except Exception:
