@@ -150,6 +150,16 @@
       display: none;
     }
 
+    .subtitle-word {
+      padding: 0 .04em;
+      border-radius: 4px;
+    }
+
+    .subtitle-word.active {
+      background: rgba(99, 102, 241, 0.45);
+      color: #fff;
+    }
+
     .meta {
       font-size: 13px;
       color: var(--muted);
@@ -319,6 +329,8 @@
       pollingTimer: null,
       activeIndex: -1,
       exportTaskId: null,
+      wordTick: 0,
+      currentWordIndex: -1,
     };
 
     const el = {
@@ -473,7 +485,19 @@
 
       const entry = state.subtitles[idx];
       el.subtitlePreview.style.display = 'block';
-      el.subtitlePreview.textContent = entry.text || '';
+      const text = String(entry.text || '').trim();
+      const words = text ? text.split(/\s+/).filter(Boolean) : [];
+
+      if (!words.length) {
+        el.subtitlePreview.textContent = text;
+      } else {
+        const safeWordIndex = Math.max(0, Math.min(words.length - 1, state.currentWordIndex));
+        const html = words.map((word, i) => {
+          const cls = i === safeWordIndex ? 'subtitle-word active' : 'subtitle-word';
+          return `<span class="${cls}">${word.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`;
+        }).join(' ');
+        el.subtitlePreview.innerHTML = html;
+      }
 
       const position = el.positionInput.value || 'bottom';
       const marginV = Number(el.marginVInput.value || 30);
@@ -530,6 +554,16 @@
       const idx = state.subtitles.findIndex((s) => current >= s.start && current <= s.end);
       state.activeIndex = idx;
       el.activeCaption.textContent = idx >= 0 ? `#${idx + 1}` : '—';
+
+      if (idx >= 0) {
+        const currentSubtitle = state.subtitles[idx];
+        const duration = Math.max(0.05, Number(currentSubtitle.end) - Number(currentSubtitle.start));
+        const progress = Math.max(0, Math.min(1, (current - Number(currentSubtitle.start)) / duration));
+        const words = String(currentSubtitle.text || '').trim().split(/\s+/).filter(Boolean);
+        state.currentWordIndex = words.length ? Math.min(words.length - 1, Math.floor(progress * words.length)) : -1;
+      } else {
+        state.currentWordIndex = -1;
+      }
 
       [...el.subtitleList.querySelectorAll('.subtitle-card')].forEach((node, i) => {
         node.classList.toggle('active', i === idx);

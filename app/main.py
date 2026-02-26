@@ -265,8 +265,8 @@ def _build_force_style(payload: ExportRequest) -> str:
         "Alignment": alignment,
         "MarginV": payload.margin_v,
     }
-    # Экранируем разделители внутри filtergraph.
-    return r"\,".join(f"{key}={value}" for key, value in style.items())
+    # Для force_style ожидается стандартный список `k=v,k=v`.
+    return ",".join(f"{key}={value}" for key, value in style.items())
 
 
 def _run_export_task(task_id: str, payload: ExportRequest) -> None:
@@ -283,10 +283,14 @@ def _run_export_task(task_id: str, payload: ExportRequest) -> None:
         subtitles_filter_path = escape_subtitles_filter_path(subtitles_path)
         force_style = _build_force_style(payload)
 
+        src = ffmpeg.input(str(video_path))
+        video_stream = src.video.filter("subtitles", subtitles_filter_path, force_style=force_style)
+        audio_stream = src.audio
+
         (
-            ffmpeg.input(str(video_path))
-            .filter("subtitles", subtitles_filter_path, force_style=force_style)
-            .output(
+            ffmpeg.output(
+                video_stream,
+                audio_stream,
                 str(output_path),
                 vcodec="libx264",
                 acodec="aac",
