@@ -290,12 +290,13 @@
           <input id="outlineColorInput" type="color" value="#000000" title="Цвет обводки" />
           <input id="outlineInput" type="number" min="0" max="8" value="2" placeholder="Обводка" />
         </div>
-        <div class="row" style="grid-template-columns: 1fr 1fr 1fr; margin-top:8px;">
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr 1fr; margin-top:8px;">
           <input id="speedInput" type="number" min="0.5" max="3" step="0.05" value="1" placeholder="Скорость видео" />
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
             <input id="karaokeEnabledInput" type="checkbox" checked /> Подсветка слов (karaoke)
           </label>
           <input id="karaokeColorInput" type="color" value="#ff6600" title="Цвет karaoke-подсветки" />
+          <input id="karaokeBgColorInput" type="color" value="#3f46e5" title="Цвет фона активного слова" />
         </div>
         <div id="exportSettingsText" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
       </div>
@@ -358,6 +359,7 @@
       speedInput: document.getElementById('speedInput'),
       karaokeEnabledInput: document.getElementById('karaokeEnabledInput'),
       karaokeColorInput: document.getElementById('karaokeColorInput'),
+      karaokeBgColorInput: document.getElementById('karaokeBgColorInput'),
       exportSettingsText: document.getElementById('exportSettingsText'),
       addSubtitleBtn: document.getElementById('addSubtitleBtn'),
       subtitleList: document.getElementById('subtitleList'),
@@ -504,17 +506,25 @@
         el.subtitlePreview.textContent = text;
       } else {
         const safeWordIndex = Math.max(0, Math.min(words.length - 1, state.currentWordIndex));
+        const activeBg = el.karaokeBgColorInput.value || '#3f46e5';
+        const karaokeEnabled = Boolean(el.karaokeEnabledInput.checked);
         const html = words.map((word, i) => {
-          const cls = i === safeWordIndex ? 'subtitle-word active' : 'subtitle-word';
-          return `<span class="${cls}">${word.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`;
+          const isActive = karaokeEnabled && i === safeWordIndex;
+          const cls = isActive ? 'subtitle-word active' : 'subtitle-word';
+          const style = isActive ? ` style="background:${activeBg};"` : '';
+          return `<span class="${cls}"${style}>${word.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`;
         }).join(' ');
         el.subtitlePreview.innerHTML = html;
       }
 
       const position = el.positionInput.value || 'bottom';
       const marginV = Number(el.marginVInput.value || 30);
+      const sourceHeight = Number(el.video.videoHeight || 0);
+      const displayedHeight = Number(el.video.clientHeight || 0);
+      const previewScale = sourceHeight > 0 && displayedHeight > 0 ? (displayedHeight / sourceHeight) : 1;
+      const effectiveMarginV = Math.max(0, marginV * previewScale);
       if (position === 'top') {
-        el.subtitlePreview.style.top = `${marginV}px`;
+        el.subtitlePreview.style.top = `${effectiveMarginV}px`;
         el.subtitlePreview.style.bottom = 'auto';
       } else if (position === 'middle') {
         el.subtitlePreview.style.top = '50%';
@@ -522,7 +532,7 @@
         el.subtitlePreview.style.transform = 'translateY(-50%)';
       } else {
         el.subtitlePreview.style.top = 'auto';
-        el.subtitlePreview.style.bottom = `${marginV}px`;
+        el.subtitlePreview.style.bottom = `${effectiveMarginV}px`;
       }
 
       if (position !== 'middle') {
@@ -530,6 +540,7 @@
       }
 
       const fontSize = Math.max(12, Math.min(96, Number(el.fontSizeInput.value || 28)));
+      const effectiveFontSize = Math.max(10, fontSize * previewScale);
       const outline = Math.max(0, Math.min(8, Number(el.outlineInput.value || 2)));
       const textColor = assToHexColor((() => {
         const m = /^#?([0-9a-f]{6})$/i.exec(String(el.textColorInput.value || '').trim());
@@ -546,7 +557,7 @@
 
       el.subtitlePreview.style.color = textColor;
       el.subtitlePreview.style.fontFamily = `${el.fontNameInput.value || 'Arial'}, sans-serif`;
-      el.subtitlePreview.style.fontSize = `${fontSize}px`;
+      el.subtitlePreview.style.fontSize = `${effectiveFontSize}px`;
       el.subtitlePreview.style.textShadow = `
         -${outline}px -${outline}px 0 ${outlineColor},
          ${outline}px -${outline}px 0 ${outlineColor},
@@ -556,6 +567,7 @@
 
       el.exportSettingsText.textContent = [
         `Шрифт: ${el.fontNameInput.value || 'Arial'} ${fontSize}px`,
+        `Превью-масштаб: x${previewScale.toFixed(3)}`,
         `Позиция: ${el.positionInput.value}, marginV=${marginV}`,
         `Скорость: x${Number(el.speedInput.value || 1).toFixed(2)}`,
         `Karaoke: ${el.karaokeEnabledInput.checked ? 'вкл' : 'выкл'}`,
@@ -832,10 +844,14 @@
       el.speedInput,
       el.karaokeEnabledInput,
       el.karaokeColorInput,
+      el.karaokeBgColorInput,
     ].forEach((node) => {
       node.addEventListener('input', updateSubtitlePreview);
       node.addEventListener('change', updateSubtitlePreview);
     });
+
+    el.video.addEventListener('loadedmetadata', updateSubtitlePreview);
+    window.addEventListener('resize', updateSubtitlePreview);
 
     // --- Стартовое состояние экрана ---
     setProgress('ожидание действий', 0);
