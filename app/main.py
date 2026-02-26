@@ -121,9 +121,20 @@ def srt_path(file_id: str) -> Path:
 def escape_subtitles_filter_path(path: Path) -> str:
     """Экранирует путь для безопасной подстановки в ffmpeg subtitles filter."""
 
-    raw = path.as_posix()
-    # Для ffmpeg filtergraph двоеточие и одинарные кавычки должны быть экранированы.
-    return raw.replace("\\", r"\\\\").replace(":", r"\:").replace("'", r"\'")
+    resolved = path.resolve()
+    try:
+        # Используем путь относительно корня проекта, чтобы избежать проблем с `C:` на Windows.
+        # FFmpeg корректно читает относительные пути вида `outputs/file.srt`.
+        raw = resolved.relative_to(BASE_DIR.resolve()).as_posix()
+    except ValueError:
+        raw = resolved.as_posix()
+
+    # Для ffmpeg filtergraph экранируем только потенциально проблемные символы.
+    escaped = raw.replace("'", r"\'")
+    # Если всё же пришел абсолютный Windows-путь, экранируем двоеточие диска один раз.
+    if re.match(r"^[A-Za-z]:/", escaped):
+        escaped = escaped.replace(":", r"\:", 1)
+    return escaped
 
 
 def save_subtitles(file_id: str, subtitles: List[SubtitleEntry]) -> Path:
