@@ -264,6 +264,7 @@ def _build_force_style(payload: ExportRequest) -> str:
         "Outline": payload.outline,
         "Alignment": alignment,
         "MarginV": payload.margin_v,
+        "WrapStyle": 2,
     }
     # Для force_style ожидается стандартный список `k=v,k=v`.
     return ",".join(f"{key}={value}" for key, value in style.items())
@@ -284,7 +285,23 @@ def _run_export_task(task_id: str, payload: ExportRequest) -> None:
         force_style = _build_force_style(payload)
 
         src = ffmpeg.input(str(video_path))
-        video_stream = src.video.filter("subtitles", subtitles_filter_path, force_style=force_style)
+
+        # Для SRT libass использует виртуальное разрешение (PlayRes) и может
+        # чрезмерно масштабировать шрифт на вертикальных видео.
+        # Передаем original_size реального видео, чтобы размер шрифта оставался корректным.
+        filter_kwargs = {"force_style": force_style}
+        probe_data = ffmpeg.probe(str(video_path))
+        video_stream_info = next(
+            (stream for stream in probe_data.get("streams", []) if stream.get("codec_type") == "video"),
+            None,
+        )
+        if video_stream_info:
+            width = int(video_stream_info.get("width", 0) or 0)
+            height = int(video_stream_info.get("height", 0) or 0)
+            if width > 0 and height > 0:
+                filter_kwargs["original_size"] = f"{width}x{height}"
+
+        video_stream = src.video.filter("subtitles", subtitles_filter_path, **filter_kwargs)
         audio_stream = src.audio
 
         (
