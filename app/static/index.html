@@ -116,11 +116,15 @@
     }
 
     video {
-      width: 100%;
+      width: min(100%, 640px);
+      max-height: 70vh;
       border-radius: 10px;
       border: 1px solid var(--border);
       background: #000;
       margin-top: 8px;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
     }
 
     .video-wrap {
@@ -284,6 +288,10 @@
             <option value="top">Сверху</option>
           </select>
         </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr; margin-bottom:8px;">
+          <input id="minWordsInput" type="number" min="1" max="20" value="1" placeholder="Мин. слов в строке" />
+          <input id="maxWordsInput" type="number" min="1" max="30" value="8" placeholder="Макс. слов в строке" />
+        </div>
         <div class="row" style="grid-template-columns: 1fr 1fr 1fr 1fr;">
           <input id="marginVInput" type="number" min="0" max="300" value="30" placeholder="Отступ по вертикали" />
           <input id="textColorInput" type="color" value="#ffffff" title="Цвет текста" />
@@ -360,6 +368,8 @@
       karaokeEnabledInput: document.getElementById('karaokeEnabledInput'),
       karaokeColorInput: document.getElementById('karaokeColorInput'),
       karaokeBgColorInput: document.getElementById('karaokeBgColorInput'),
+      minWordsInput: document.getElementById('minWordsInput'),
+      maxWordsInput: document.getElementById('maxWordsInput'),
       exportSettingsText: document.getElementById('exportSettingsText'),
       addSubtitleBtn: document.getElementById('addSubtitleBtn'),
       subtitleList: document.getElementById('subtitleList'),
@@ -717,7 +727,13 @@
     // --- Запуск AI генерации через Whisper ---
     async function startGenerate() {
       if (!state.fileId) return toast('Сначала загрузите видео', 'error');
-      const payload = { file_id: state.fileId, model_size: 'base', language: 'ru' };
+      const payload = {
+        file_id: state.fileId,
+        model_size: 'base',
+        language: 'ru',
+        min_words: Number(el.minWordsInput.value || 1),
+        max_words: Number(el.maxWordsInput.value || 8),
+      };
       const data = await api('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -757,6 +773,7 @@
           playback_speed: Number(el.speedInput.value || 1),
           karaoke_enabled: Boolean(el.karaokeEnabledInput.checked),
           karaoke_highlight_color: toAssColor(el.karaokeColorInput.value),
+          word_bg_color: toAssColor(el.karaokeBgColorInput.value),
         }),
       });
 

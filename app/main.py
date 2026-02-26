@@ -47,6 +47,8 @@ class GenerateRequest(BaseModel):
     file_id: str
     model_size: Literal["tiny", "base", "small", "medium", "large"] = "base"
     language: Optional[str] = "ru"
+    min_words: int = Field(default=1, ge=1, le=20)
+    max_words: int = Field(default=8, ge=1, le=30)
 
 
 class ExportRequest(BaseModel):
@@ -63,6 +65,7 @@ class ExportRequest(BaseModel):
     playback_speed: float = Field(default=1.0, ge=0.5, le=3.0)
     karaoke_enabled: bool = True
     karaoke_highlight_color: str = Field(default="&H000066FF", pattern=r"^&H[0-9A-Fa-f]{8}$")
+    word_bg_color: str = Field(default="&H003F46E5", pattern=r"^&H[0-9A-Fa-f]{8}$")
 
 
 class TaskState(BaseModel):
@@ -214,7 +217,14 @@ def safe_subtitle_path(file_id: str) -> Path:
     return path
 
 
-def _run_whisper_task(task_id: str, file_id: str, model_size: str, language: Optional[str]) -> None:
+def _run_whisper_task(
+    task_id: str,
+    file_id: str,
+    model_size: str,
+    language: Optional[str],
+    min_words: int,
+    max_words: int,
+) -> None:
     """Фоновая задача: извлекает текст из видео и сохраняет SRT."""
 
     try:
@@ -238,16 +248,66 @@ def _run_whisper_task(task_id: str, file_id: str, model_size: str, language: Opt
                 )
             )
 
-        save_subtitles(file_id, segments)
+        normalized_segments = _split_segments_by_word_limits(segments, min_words=min_words, max_words=max_words)
+        save_subtitles(file_id, normalized_segments)
         files_store.setdefault(file_id, {})["updated_at"] = now_utc().isoformat()
 
         tasks_store[task_id] = TaskState(
             status="completed",
             progress=100,
-            result={"file_id": file_id, "segments": len(segments)},
+            result={"file_id": file_id, "segments": len(normalized_segments)},
         )
     except Exception as exc:  # noqa: BLE001
         tasks_store[task_id] = TaskState(status="failed", progress=100, error=str(exc))
+
+
+def _split_segments_by_word_limits(
+    segments: List[SubtitleEntry],
+    min_words: int,
+    max_words: int,
+) -> List[SubtitleEntry]:
+    """Ограничивает длину строк субтитров по количеству слов."""
+
+    if max_words < min_words:
+        max_words = min_words
+
+    prepared: List[SubtitleEntry] = []
+    for seg in segments:
+        words = [w for w in seg.text.split() if w]
+        if not words:
+            continue
+
+        if len(words) <= max_words:
+            prepared.append(seg)
+            continue
+
+        chunks = [words[i : i + max_words] for i in range(0, len(words), max_words)]
+        total_duration = max(0.1, seg.end - seg.start)
+        chunk_duration = total_duration / len(chunks)
+        for idx, chunk in enumerate(chunks):
+            prepared.append(
+                SubtitleEntry(
+                    id=len(prepared) + 1,
+                    start=seg.start + idx * chunk_duration,
+                    end=seg.start + (idx + 1) * chunk_duration,
+                    text=" ".join(chunk),
+                )
+            )
+
+    merged: List[SubtitleEntry] = []
+    for seg in prepared:
+        if merged and len(seg.text.split()) < min_words:
+            prev = merged[-1]
+            merged[-1] = SubtitleEntry(
+                id=prev.id,
+                start=prev.start,
+                end=max(prev.end, seg.end),
+                text=f"{prev.text} {seg.text}".strip(),
+            )
+        else:
+            merged.append(seg)
+
+    return [SubtitleEntry(id=i + 1, start=x.start, end=x.end, text=x.text) for i, x in enumerate(merged)]
 
 
 def _build_force_style(payload: ExportRequest) -> str:
@@ -317,6 +377,10 @@ def _save_ass_from_srt(file_id: str, payload: ExportRequest, width: int, height:
             f"Style: Default,{font_name},{payload.font_size},{payload.primary_color},{payload.karaoke_highlight_color},{payload.outline_color},&H00000000,"
             f"0,0,0,0,100,100,0,0,1,{payload.outline},0,{alignment},24,24,{payload.margin_v},1"
         ),
+        (
+            f"Style: WordBG,{font_name},{payload.font_size},{payload.primary_color},&H000000FF,{payload.outline_color},{payload.word_bg_color},"
+            f"0,0,0,0,100,100,0,0,3,{payload.outline},0,{alignment},24,24,{payload.margin_v},1"
+        ),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -324,19 +388,46 @@ def _save_ass_from_srt(file_id: str, payload: ExportRequest, width: int, height:
 
     for item in subtitles:
         safe_text = item.text.replace("{", "(").replace("}", ")").replace("\n", r"\N").strip()
+        words = [word for word in re.split(r"\s+", safe_text) if word]
+
         if payload.karaoke_enabled and safe_text:
-            words = [word for word in re.split(r"\s+", safe_text) if word]
-            if words:
-                duration_cs = max(1, int(round((item.end - item.start) * 100)))
-                per_word = max(1, duration_cs // len(words))
-                karaoke_text = " ".join(f"{{\\k{per_word}}}{word}" for word in words)
-                safe_text = karaoke_text
-        lines.append(
-            "Dialogue: 0,"
-            f"{_to_ass_timestamp(item.start)},"
-            f"{_to_ass_timestamp(item.end)},"
-            f"Default,,0,0,0,,{safe_text}"
-        )
+            duration_cs = max(1, int(round((item.end - item.start) * 100)))
+            per_word = max(1, duration_cs // max(1, len(words)))
+            karaoke_text = " ".join(f"{{\\k{per_word}}}{word}" for word in words)
+            lines.append(
+                "Dialogue: 0,"
+                f"{_to_ass_timestamp(item.start)},"
+                f"{_to_ass_timestamp(item.end)},"
+                f"Default,,0,0,0,,{karaoke_text}"
+            )
+            continue
+
+        # Режим без karaoke: делаем пословную подсветку фоном через дробление на события.
+        if words:
+            total_duration = max(0.1, item.end - item.start)
+            per_word_sec = total_duration / len(words)
+            for idx, _word in enumerate(words):
+                seg_start = item.start + idx * per_word_sec
+                seg_end = item.start + (idx + 1) * per_word_sec
+                pieces = []
+                for w_i, w in enumerate(words):
+                    if w_i == idx:
+                        pieces.append(f"{{\\rWordBG}}{w}{{\\rDefault}}")
+                    else:
+                        pieces.append(w)
+                lines.append(
+                    "Dialogue: 0,"
+                    f"{_to_ass_timestamp(seg_start)},"
+                    f"{_to_ass_timestamp(seg_end)},"
+                    f"Default,,0,0,0,,{' '.join(pieces)}"
+                )
+        else:
+            lines.append(
+                "Dialogue: 0,"
+                f"{_to_ass_timestamp(item.start)},"
+                f"{_to_ass_timestamp(item.end)},"
+                f"Default,,0,0,0,,{safe_text}"
+            )
 
     target = ass_path(file_id)
     target.write_text("\n".join(lines), encoding="utf-8")
@@ -531,6 +622,8 @@ async def generate_subtitles(payload: GenerateRequest, background_tasks: Backgro
         payload.file_id,
         payload.model_size,
         payload.language,
+        payload.min_words,
+        payload.max_words,
     )
     return {"task_id": task_id, "status": "queued"}
 
