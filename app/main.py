@@ -111,6 +111,14 @@ def srt_path(file_id: str) -> Path:
     return OUTPUT_DIR / f"{file_id}.srt"
 
 
+def escape_subtitles_filter_path(path: Path) -> str:
+    """Экранирует путь для безопасной подстановки в ffmpeg subtitles filter."""
+
+    raw = path.as_posix()
+    # Для ffmpeg filtergraph двоеточие и одинарные кавычки должны быть экранированы.
+    return raw.replace("\\", r"\\\\").replace(":", r"\:").replace("'", r"\'")
+
+
 def save_subtitles(file_id: str, subtitles: List[SubtitleEntry]) -> Path:
     """Сохраняет список субтитров на диск в формате SRT."""
 
@@ -228,17 +236,19 @@ def _run_export_task(task_id: str, file_id: str) -> None:
         output_path = OUTPUT_DIR / f"{file_id}_burned.mp4"
         tasks_store[task_id] = TaskState(status="processing", progress=60)
 
+        subtitles_filter_path = escape_subtitles_filter_path(subtitles_path)
+
         (
             ffmpeg.input(str(video_path))
             .output(
                 str(output_path),
-                vf=f"subtitles='{subtitles_path.as_posix()}'",
+                vf=f"subtitles='{subtitles_filter_path}'",
                 vcodec="libx264",
                 acodec="aac",
                 movflags="+faststart",
             )
             .overwrite_output()
-            .run(quiet=True)
+            .run(capture_stdout=True, capture_stderr=True)
         )
 
         tasks_store[task_id] = TaskState(
@@ -246,6 +256,10 @@ def _run_export_task(task_id: str, file_id: str) -> None:
             progress=100,
             result={"download_url": f"/outputs/{output_path.name}"},
         )
+    except ffmpeg.Error as exc:
+        stderr_text = exc.stderr.decode("utf-8", errors="ignore") if exc.stderr else ""
+        message = stderr_text.strip() or str(exc)
+        tasks_store[task_id] = TaskState(status="failed", progress=100, error=message)
     except Exception as exc:  # noqa: BLE001
         tasks_store[task_id] = TaskState(status="failed", progress=100, error=str(exc))
 
